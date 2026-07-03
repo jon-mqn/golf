@@ -1,34 +1,21 @@
-# fly.io config for the golf server.
+# fly.toml app configuration file generated for golf-e2mamg on 2026-07-03T16:32:43Z
 #
-# First deploy:
-#   fly launch --copy-config --no-deploy   # creates the app, keeps this file
-#   fly deploy
-#   fly scale count 1                      # rooms are in-memory: exactly ONE machine
+# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
 #
-# Pick your app name and region below (or let `fly launch` rewrite them).
 
-app = "golf-card-game"
-primary_region = "lhr"
+app = 'golf-e2mamg'
+primary_region = 'lhr'
 
 [build]
-  dockerfile = "Dockerfile"
+  dockerfile = 'Dockerfile'
 
 [http_service]
   internal_port = 8080
   force_https = true
-  # Rooms live in this process's memory. If the machine ever stops — and it
-  # can the moment every player's socket blips at once (phones sleeping, a
-  # proxy hiccup) — every room evaporates and rejoins get RoomNotFound.
-  # Keep one machine running at all times; auto_start then only covers
-  # crash recovery.
-  auto_stop_machines = "off"
+  auto_stop_machines = 'stop'
   auto_start_machines = true
   min_machines_running = 1
 
 [[vm]]
-  size = "shared-cpu-1x"
-  memory = "256mb"
-
-[env]
-  # GOLF_ROOM_GC_SECS = "1800"
-  # GOLF_BOT_STEP_MS = "700"
+  size = 'shared-cpu-1x'
+  memory = '256mb'

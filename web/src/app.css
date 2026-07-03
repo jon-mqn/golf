@@ -12,9 +12,11 @@
   --card-black: #23211c;
   --display: "Fraunces Variable", Georgia, serif;
 
-  --card-sm: 34px;
+  /* Card widths shrink with short viewports (phone browser UI visible) so
+     the table screen always fits without scrolling. */
+  --card-sm: min(34px, 4.2dvh);
   --card-md: 56px;
-  --card-lg: 76px;
+  --card-lg: min(76px, 8.6dvh);
 
   font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   line-height: 1.4;

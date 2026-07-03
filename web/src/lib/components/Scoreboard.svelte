@@ -112,10 +112,14 @@
     inset: 0;
     z-index: 30;
     background: rgba(10, 26, 18, 0.75);
-    display: grid;
-    place-items: center;
+    display: flex;
     padding: 1rem;
     overflow-y: auto;
+  }
+  /* margin:auto centers when it fits but keeps the top reachable when the
+     scorecard is taller than a phone viewport (grid place-items clips it). */
+  .scorecard {
+    margin: auto;
   }
   .scorecard {
     background: var(--cream, #f6f0dd);

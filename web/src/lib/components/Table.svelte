@@ -65,7 +65,11 @@
       <span class="spacer"></span>
     </header>
 
-    <section class="opponents" class:solo={view.seats.length === 2 && me !== null}>
+    <section
+      class="opponents"
+      class:solo={view.seats.length === 2 && me !== null}
+      class:trio={view.seats.length === 4 && me !== null}
+    >
       {#each view.seats as seat, s (s)}
         {#if s !== me}
           <div class="opponent" class:active={playing && view.current === s}>
@@ -177,10 +181,10 @@
     min-height: 100dvh;
     display: flex;
     flex-direction: column;
-    padding: 0.5rem 0.75rem calc(0.75rem + env(safe-area-inset-bottom));
+    padding: 0.4rem 0.75rem calc(0.5rem + env(safe-area-inset-bottom));
     max-width: 560px;
     margin: 0 auto;
-    gap: 0.25rem;
+    gap: 0.2rem;
   }
 
   header {
@@ -207,17 +211,17 @@
   .opponents {
     display: flex;
     justify-content: center;
-    gap: 1rem;
+    gap: 0.75rem;
     flex-wrap: wrap;
-    padding: 0.4rem 0;
+    padding: 0.2rem 0;
   }
   .opponent {
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 0.25rem;
+    gap: 0.2rem;
     border-radius: 10px;
-    padding: 0.4rem 0.6rem;
+    padding: 0.3rem 0.55rem;
     border: 1px solid transparent;
   }
   .opponent.active {
@@ -225,7 +229,18 @@
     background: rgba(217, 180, 101, 0.08);
   }
   .opponents.solo .opponent {
-    --card-sm: 44px;
+    --card-sm: min(44px, 5.6dvh);
+  }
+  /* Three opponents must share one row on a phone. */
+  .opponents.trio {
+    gap: 0.4rem;
+  }
+  .opponents.trio .opponent {
+    --card-sm: min(29px, 4.2dvh);
+    padding: 0.3rem 0.3rem;
+  }
+  .opponents.trio .tag {
+    font-size: 0.62rem;
   }
 
   .center {
@@ -233,8 +248,8 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: 1.25rem;
-    padding: 0.5rem 0;
+    gap: 1rem;
+    padding: 0.25rem 0;
   }
   .pile,
   .tray {
@@ -259,8 +274,8 @@
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 0.4rem;
-    padding: 0.6rem 0.5rem;
+    gap: 0.3rem;
+    padding: 0.4rem 0.5rem;
     border-radius: 14px;
     border: 1px solid transparent;
   }
@@ -280,7 +295,7 @@
   }
 
   footer {
-    min-height: 3.4rem;
+    min-height: 2.4rem;
     display: grid;
     place-items: center;
   }
@@ -298,5 +313,8 @@
     gap: 0.6rem;
     flex-wrap: wrap;
     justify-content: center;
+  }
+  .resolve button {
+    padding: 0.55rem 1.1rem;
   }
 </style>

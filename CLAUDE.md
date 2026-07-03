@@ -32,6 +32,8 @@ local play. See README.md for rules and layout.
 - `cargo`, `node`, `npm`, `wasm-pack`, `just` live in `~/.cargo/bin` and
   `~/.local/bin` (Node 22 under `~/.local/opt/node-v22.17.0-linux-x64`).
 - Server env knobs: `PORT`, `GOLF_BOT_STEP_MS` (bot pacing, tests use 5),
-  `GOLF_ROOM_GC_SECS` (idle-room teardown, default 1800).
+  `GOLF_ROOM_GC_SECS` (idle-room teardown, default 1800),
+  `GOLF_LOBBY_GRACE_SECS` (how long a disconnected lobby seat is held for
+  rejoin, default 90).
 - Browser verification: Playwright + Chromium are installed in the session
   scratchpad, not the repo.

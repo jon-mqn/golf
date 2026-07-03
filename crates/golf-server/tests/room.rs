@@ -14,7 +14,15 @@ use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 struct Client {
     tx: futures_util::stream::SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, Message>,
     rx: mpsc::UnboundedReceiver<ServerMsg>,
-    _reader: tokio::task::JoinHandle<()>,
+    reader: tokio::task::JoinHandle<()>,
+}
+
+impl Drop for Client {
+    fn drop(&mut self) {
+        // The reader task owns the stream half of the socket; killing it is
+        // what actually closes the TCP connection so the server notices.
+        self.reader.abort();
+    }
 }
 
 impl Client {
@@ -34,11 +42,7 @@ impl Client {
                 }
             }
         });
-        Client {
-            tx,
-            rx,
-            _reader: reader,
-        }
+        Client { tx, rx, reader }
     }
 
     async fn send(&mut self, msg: &ClientMsg) {
@@ -258,6 +262,261 @@ async fn full_online_flow() {
     lost.recv_until(|m| match m {
         ServerMsg::Error { code, .. } => {
             assert_eq!(code, golf_server::protocol::ErrorCode::RoomNotFound);
+            Some(())
+        }
+        _ => None,
+    })
+    .await;
+}
+
+/// A lobby disconnect must NOT free the seat immediately: the player gets a
+/// grace period to rejoin with their token (network blips are routine).
+#[tokio::test]
+async fn lobby_disconnect_grace_allows_rejoin() {
+    let addr = start_server().await;
+
+    let mut ann = Client::connect(&addr).await;
+    ann.send(&ClientMsg::CreateRoom { name: "Ann".into() })
+        .await;
+    let code = ann
+        .recv_until(|m| match m {
+            ServerMsg::RoomJoined { code, .. } => Some(code),
+            _ => None,
+        })
+        .await;
+
+    let mut ben = Client::connect(&addr).await;
+    ben.send(&ClientMsg::JoinRoom {
+        code: code.clone(),
+        name: "Ben".into(),
+    })
+    .await;
+    let ben_token = ben
+        .recv_until(|m| match m {
+            ServerMsg::RoomJoined { token, .. } => Some(token),
+            _ => None,
+        })
+        .await;
+
+    // Ben's connection blips. Ann must still see his (offline) seat.
+    drop(ben);
+    ann.recv_until(|m| match m {
+        ServerMsg::Lobby { state } if state.seats.len() == 2 && !state.seats[1].connected => {
+            Some(())
+        }
+        _ => None,
+    })
+    .await;
+
+    // Within the grace period the token reclaims the seat.
+    let mut ben2 = Client::connect(&addr).await;
+    ben2.send(&ClientMsg::Rejoin {
+        code: code.clone(),
+        token: ben_token,
+    })
+    .await;
+    ben2.recv_until(|m| match m {
+        ServerMsg::RoomJoined { seat, .. } => {
+            assert_eq!(seat, 1);
+            Some(())
+        }
+        _ => None,
+    })
+    .await;
+}
+
+/// The host can kick anyone from the lobby; the kicked player is told and
+/// their token stops working.
+#[tokio::test]
+async fn host_kicks_player_from_lobby() {
+    let addr = start_server().await;
+
+    let mut ann = Client::connect(&addr).await;
+    ann.send(&ClientMsg::CreateRoom { name: "Ann".into() })
+        .await;
+    let code = ann
+        .recv_until(|m| match m {
+            ServerMsg::RoomJoined { code, .. } => Some(code),
+            _ => None,
+        })
+        .await;
+
+    let mut ben = Client::connect(&addr).await;
+    ben.send(&ClientMsg::JoinRoom {
+        code: code.clone(),
+        name: "Ben".into(),
+    })
+    .await;
+    let ben_token = ben
+        .recv_until(|m| match m {
+            ServerMsg::RoomJoined { token, .. } => Some(token),
+            _ => None,
+        })
+        .await;
+
+    // Ben must not be able to kick (not host).
+    ben.send(&ClientMsg::RemoveSeat { seat: 0 }).await;
+    ben.recv_until(|m| match m {
+        ServerMsg::Error { code, .. } => {
+            assert_eq!(code, golf_server::protocol::ErrorCode::NotHost);
+            Some(())
+        }
+        _ => None,
+    })
+    .await;
+
+    ann.send(&ClientMsg::RemoveSeat { seat: 1 }).await;
+    ben.recv_until(|m| match m {
+        ServerMsg::Error { code, .. } => {
+            assert_eq!(code, golf_server::protocol::ErrorCode::Kicked);
+            Some(())
+        }
+        _ => None,
+    })
+    .await;
+    ann.recv_until(|m| match m {
+        ServerMsg::Lobby { state } if state.seats.len() == 1 => Some(()),
+        _ => None,
+    })
+    .await;
+
+    // The kicked token is dead.
+    let mut ben2 = Client::connect(&addr).await;
+    ben2.send(&ClientMsg::Rejoin {
+        code,
+        token: ben_token,
+    })
+    .await;
+    ben2.recv_until(|m| match m {
+        ServerMsg::Error { code, .. } => {
+            assert_eq!(code, golf_server::protocol::ErrorCode::BadToken);
+            Some(())
+        }
+        _ => None,
+    })
+    .await;
+}
+
+/// Kicking a human mid-game hands their seat to a bot so the match keeps
+/// moving — the fix for a table stalled on someone who left for good.
+#[tokio::test]
+async fn mid_game_kick_hands_seat_to_bot() {
+    let addr = start_server().await;
+
+    let mut ann = Client::connect(&addr).await;
+    ann.send(&ClientMsg::CreateRoom { name: "Ann".into() })
+        .await;
+    let code = ann
+        .recv_until(|m| match m {
+            ServerMsg::RoomJoined { code, .. } => Some(code),
+            _ => None,
+        })
+        .await;
+
+    let mut ben = Client::connect(&addr).await;
+    ben.send(&ClientMsg::JoinRoom {
+        code: code.clone(),
+        name: "Ben".into(),
+    })
+    .await;
+    ben.recv_until(|m| match m {
+        ServerMsg::RoomJoined { .. } => Some(()),
+        _ => None,
+    })
+    .await;
+
+    ann.recv_until(|m| match m {
+        ServerMsg::Lobby { state } if state.seats.len() == 2 => Some(()),
+        _ => None,
+    })
+    .await;
+    ann.send(&ClientMsg::StartMatch { holes: 1 }).await;
+    let mut view = ann.next_state().await;
+
+    // Kick Ben; he's told, and his seat plays on as a bot.
+    ann.send(&ClientMsg::RemoveSeat { seat: 1 }).await;
+    ben.recv_until(|m| match m {
+        ServerMsg::Error { code, .. } => {
+            assert_eq!(code, golf_server::protocol::ErrorCode::Kicked);
+            Some(())
+        }
+        _ => None,
+    })
+    .await;
+
+    // Ann alone can finish the hole: the takeover bot moves for seat 1.
+    let mut n = 0;
+    loop {
+        if matches!(view.phase, PhaseView::HoleComplete { .. }) {
+            break;
+        }
+        if view.current == 0 && !view.legal_actions.is_empty() {
+            let action = next_action(&view);
+            ann.send(&ClientMsg::Act { action }).await;
+        }
+        view = ann.next_state().await;
+        n += 1;
+        assert!(n < 500, "hole did not complete after the kick");
+    }
+}
+
+/// Emotes fan out to the whole table, and spam inside the cooldown window is
+/// silently dropped.
+#[tokio::test]
+async fn emotes_broadcast_and_rate_limit() {
+    let addr = start_server().await;
+
+    let mut ann = Client::connect(&addr).await;
+    ann.send(&ClientMsg::CreateRoom { name: "Ann".into() })
+        .await;
+    let code = ann
+        .recv_until(|m| match m {
+            ServerMsg::RoomJoined { code, .. } => Some(code),
+            _ => None,
+        })
+        .await;
+
+    let mut ben = Client::connect(&addr).await;
+    ben.send(&ClientMsg::JoinRoom {
+        code: code.clone(),
+        name: "Ben".into(),
+    })
+    .await;
+    ben.recv_until(|m| match m {
+        ServerMsg::RoomJoined { .. } => Some(()),
+        _ => None,
+    })
+    .await;
+
+    // Two back-to-back emotes: only the first may land. The Ping/Pong pair
+    // brackets the burst so we know the room processed all of it.
+    ben.send(&ClientMsg::Emote {
+        emote: golf_server::protocol::Emote::Fire,
+    })
+    .await;
+    ben.send(&ClientMsg::Emote {
+        emote: golf_server::protocol::Emote::Cry,
+    })
+    .await;
+    ben.send(&ClientMsg::Ping).await;
+
+    let mut seen = Vec::new();
+    ben.recv_until(|m| match m {
+        ServerMsg::Emote { seat, emote } => {
+            seen.push((seat, emote));
+            None
+        }
+        ServerMsg::Pong => Some(()),
+        _ => None,
+    })
+    .await;
+    assert_eq!(seen, vec![(1, golf_server::protocol::Emote::Fire)]);
+
+    // Everyone at the table sees it, not just the sender.
+    ann.recv_until(|m| match m {
+        ServerMsg::Emote { seat, emote } => {
+            assert_eq!(seat, 1);
+            assert_eq!(emote, golf_server::protocol::Emote::Fire);
             Some(())
         }
         _ => None,

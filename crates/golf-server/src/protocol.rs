@@ -25,7 +25,8 @@ pub enum ClientMsg {
     AddBot {
         difficulty: Difficulty,
     },
-    /// Host only, lobby only; bots only.
+    /// Host only. In the lobby the seat (bot or human) is removed; mid-game
+    /// a kicked human's seat is handed to a bot so the match can continue.
     RemoveSeat {
         seat: Seat,
     },
@@ -37,7 +38,23 @@ pub enum ClientMsg {
     Act {
         action: Action,
     },
+    /// A quick reaction shown to the whole table. Rate-limited server-side.
+    Emote {
+        emote: Emote,
+    },
     Ping,
+}
+
+/// Fixed emote palette — a closed set so clients never render untrusted text.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub enum Emote {
+    Wave,
+    Laugh,
+    Cry,
+    Fire,
+    Clap,
+    Zzz,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
@@ -60,6 +77,11 @@ pub enum ServerMsg {
     /// Personalized, redacted snapshot — the client's whole truth.
     State {
         view: PlayerView,
+    },
+    /// A player's reaction, fanned out to everyone at the table.
+    Emote {
+        seat: Seat,
+        emote: Emote,
     },
     Error {
         code: ErrorCode,
@@ -97,4 +119,6 @@ pub enum ErrorCode {
     BadToken,
     BadAction,
     BadRequest,
+    /// The host removed you from the table. Terminal: the seat token is void.
+    Kicked,
 }

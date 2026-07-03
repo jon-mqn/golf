@@ -1,9 +1,11 @@
-use crate::protocol::{ClientMsg, ErrorCode, LobbySeat, LobbyState, ServerMsg};
+use crate::protocol::{ClientMsg, Emote, ErrorCode, LobbySeat, LobbyState, ServerMsg};
 use crate::registry::Registry;
+use futures_util::FutureExt;
 use golf_engine::bot::{make_bot, Bot, Difficulty};
 use golf_engine::{Event, MatchConfig, MatchState, Phase, Seat, SeatConfig, SeatKind, Viewer};
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
+use std::panic::AssertUnwindSafe;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::{mpsc, oneshot};
@@ -19,6 +21,14 @@ fn bot_step_delay() -> Duration {
 }
 /// A room with no connections left is torn down after this long.
 const DEFAULT_GC: Duration = Duration::from_secs(30 * 60);
+/// In the lobby a disconnected (non-host) seat is held this long for a
+/// rejoin before it's freed. Mid-game seats are held indefinitely.
+const DEFAULT_LOBBY_GRACE: Duration = Duration::from_secs(90);
+/// Minimum gap between emotes from one seat; extras are silently dropped.
+const EMOTE_COOLDOWN: Duration = Duration::from_millis(1200);
+/// Difficulty of the bot that takes over a seat when its human is kicked
+/// mid-game.
+const TAKEOVER_BOT: Difficulty = Difficulty::Medium;
 
 const MAX_SEATS: usize = 4;
 
@@ -54,6 +64,10 @@ struct SeatSlot {
     token: Option<String>,
     conn_id: Option<ConnId>,
     conn: Option<mpsc::Sender<ServerMsg>>,
+    /// Lobby only: when a disconnected seat is freed if its player never
+    /// rejoins.
+    vacate_at: Option<Instant>,
+    last_emote: Option<Instant>,
 }
 
 impl SeatSlot {
@@ -67,7 +81,6 @@ pub fn spawn_room(registry: Arc<Registry>) -> (String, mpsc::Sender<RoomCmd>) {
     let code = registry.create(tx.clone());
     let room = Room {
         code: code.clone(),
-        registry,
         seats: Vec::new(),
         game: None,
         bots: Vec::new(),
@@ -77,7 +90,16 @@ pub fn spawn_room(registry: Arc<Registry>) -> (String, mpsc::Sender<RoomCmd>) {
         bot_deadline: None,
         gc_deadline: Some(Instant::now() + gc_timeout()),
     };
-    tokio::spawn(room.run());
+    let task_code = code.clone();
+    tokio::spawn(async move {
+        // The registry entry must go even if the room panics; a leaked entry
+        // is a room code that accepts joins nobody will ever answer.
+        if AssertUnwindSafe(room.run()).catch_unwind().await.is_err() {
+            tracing::error!(code = %task_code, "room task panicked");
+        }
+        registry.remove(&task_code);
+        tracing::info!(code = %task_code, "room closed");
+    });
     (code, tx)
 }
 
@@ -89,9 +111,16 @@ fn gc_timeout() -> Duration {
         .unwrap_or(DEFAULT_GC)
 }
 
+fn lobby_grace() -> Duration {
+    std::env::var("GOLF_LOBBY_GRACE_SECS")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .map(Duration::from_secs)
+        .unwrap_or(DEFAULT_LOBBY_GRACE)
+}
+
 struct Room {
     code: String,
-    registry: Arc<Registry>,
     seats: Vec<SeatSlot>,
     game: Option<MatchState>,
     bots: Vec<Option<Box<dyn Bot>>>,
@@ -105,11 +134,7 @@ struct Room {
 impl Room {
     async fn run(mut self) {
         loop {
-            let deadline = match (self.bot_deadline, self.gc_deadline) {
-                (Some(a), Some(b)) => Some(a.min(b)),
-                (a, b) => a.or(b),
-            };
-            let cmd = if let Some(deadline) = deadline {
+            let cmd = if let Some(deadline) = self.next_deadline() {
                 tokio::select! {
                     cmd = self.rx.recv() => match cmd {
                         Some(cmd) => Some(cmd),
@@ -132,8 +157,14 @@ impl Room {
                 }
             }
         }
-        self.registry.remove(&self.code);
-        tracing::info!(code = %self.code, "room closed");
+    }
+
+    fn next_deadline(&self) -> Option<Instant> {
+        let vacate = self.seats.iter().filter_map(|s| s.vacate_at).min();
+        [self.bot_deadline, self.gc_deadline, vacate]
+            .into_iter()
+            .flatten()
+            .min()
     }
 
     /// Returns true when the room should shut down.
@@ -148,6 +179,14 @@ impl Room {
         if self.bot_deadline.is_some_and(|d| d <= now) {
             self.bot_deadline = None;
             self.bot_step().await;
+        }
+        // Free lobby seats whose disconnect grace ran out.
+        if !self.started() {
+            let before = self.seats.len();
+            self.seats.retain(|s| s.vacate_at.is_none_or(|d| d > now));
+            if self.seats.len() != before {
+                self.broadcast_lobby().await;
+            }
         }
         false
     }
@@ -188,6 +227,8 @@ impl Room {
             token: Some(token.clone()),
             conn_id: Some(conn_id),
             conn: Some(conn.clone()),
+            vacate_at: None,
+            last_emote: None,
         });
         self.gc_deadline = None;
         let _ = conn
@@ -218,6 +259,7 @@ impl Room {
         let slot = &mut self.seats[seat];
         slot.conn_id = Some(conn_id);
         slot.conn = Some(conn.clone());
+        slot.vacate_at = None;
         self.gc_deadline = None;
         let _ = conn
             .send(ServerMsg::RoomJoined {
@@ -256,12 +298,13 @@ impl Room {
                 }
             }
             ClientMsg::RemoveSeat { seat: target } => {
-                if let Err(code) = self.remove_seat(seat, target) {
+                if let Err(code) = self.remove_seat(seat, target).await {
                     self.send_error(seat, code).await;
                 } else {
                     self.broadcast_lobby().await;
                 }
             }
+            ClientMsg::Emote { emote } => self.emote(seat, emote).await,
             ClientMsg::StartMatch { holes } => match self.start_match(seat, holes) {
                 Err(code) => self.send_error(seat, code).await,
                 Ok(events) => {
@@ -317,23 +360,55 @@ impl Room {
             token: None,
             conn_id: None,
             conn: None,
+            vacate_at: None,
+            last_emote: None,
         });
         Ok(())
     }
 
-    fn remove_seat(&mut self, seat: Seat, target: Seat) -> Result<(), ErrorCode> {
+    /// Host removes a seat. In the lobby the seat simply goes away; mid-game
+    /// a human seat is handed to a bot so the match keeps moving (the usual
+    /// reason to kick: someone left and won't be back).
+    async fn remove_seat(&mut self, seat: Seat, target: Seat) -> Result<(), ErrorCode> {
         self.require_host(seat)?;
+        if target == seat {
+            return Err(ErrorCode::BadRequest);
+        }
+        if self.seats.get(target as usize).is_none() {
+            return Err(ErrorCode::BadRequest);
+        }
         if self.started() {
-            return Err(ErrorCode::MatchAlreadyStarted);
+            if self.seats[target as usize].is_bot() {
+                return Err(ErrorCode::BadRequest);
+            }
+            self.send_error(target, ErrorCode::Kicked).await;
+            let slot = &mut self.seats[target as usize];
+            slot.conn = None;
+            slot.conn_id = None;
+            slot.token = None;
+            slot.difficulty = Some(TAKEOVER_BOT);
+            self.bots[target as usize] = Some(make_bot(TAKEOVER_BOT));
+            self.schedule_bots();
+        } else {
+            self.send_error(target, ErrorCode::Kicked).await;
+            self.seats.remove(target as usize);
         }
-        let Some(slot) = self.seats.get(target as usize) else {
-            return Err(ErrorCode::BadRequest);
-        };
-        if !slot.is_bot() {
-            return Err(ErrorCode::BadRequest);
-        }
-        self.seats.remove(target as usize);
         Ok(())
+    }
+
+    /// Fan a reaction out to the table, dropping spam.
+    async fn emote(&mut self, seat: Seat, emote: Emote) {
+        let now = Instant::now();
+        let slot = &mut self.seats[seat as usize];
+        if slot.last_emote.is_some_and(|t| now - t < EMOTE_COOLDOWN) {
+            return;
+        }
+        slot.last_emote = Some(now);
+        for slot in &self.seats {
+            if let Some(conn) = &slot.conn {
+                let _ = conn.send(ServerMsg::Emote { seat, emote }).await;
+            }
+        }
     }
 
     fn start_match(&mut self, seat: Seat, holes: u8) -> Result<Vec<Event>, ErrorCode> {
@@ -359,6 +434,10 @@ impl Room {
             holes: holes.clamp(1, 18),
         };
         let game = MatchState::new(config, self.rng.random()).map_err(|_| ErrorCode::BadRequest)?;
+        // Seats are held for the whole match; cancel any pending lobby reaps.
+        for slot in &mut self.seats {
+            slot.vacate_at = None;
+        }
         self.bots = self
             .seats
             .iter()
@@ -413,13 +492,15 @@ impl Room {
         let Some(seat) = self.seat_of(conn_id) else {
             return;
         };
+        let started = self.started();
         let slot = &mut self.seats[seat as usize];
         slot.conn = None;
         slot.conn_id = None;
-        // In the lobby a departing player frees the seat entirely (only if
-        // they're not the host — the host keeps the room alive to return).
-        if !self.started() && seat != 0 {
-            self.seats.remove(seat as usize);
+        // In the lobby the seat is held for a grace period so a network blip
+        // doesn't cost the player their place (the host's seat is always
+        // held — it keeps the room alive to return to).
+        if !started && seat != 0 {
+            slot.vacate_at = Some(Instant::now() + lobby_grace());
         }
         if self.seats.iter().all(|s| s.conn.is_none()) {
             self.gc_deadline = Some(Instant::now() + gc_timeout());

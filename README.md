@@ -8,8 +8,10 @@ A web-based version of the card game Golf, playable on phones and desktops:
   between turns.
 - **Play the bots** — Easy / Medium / Hard opponents, fully in-browser.
 - **Online tables** — create a table, share the 4-letter code or the
-  `/room/CODE` link; mix friends and bots. Refreshing mid-game reconnects you
-  to your seat.
+  `/room/CODE` link; mix friends and bots. Refreshing or losing signal
+  mid-game reconnects you to your seat, emotes let the table heckle each
+  other, and the host can remove players (mid-game a bot takes over the
+  seat so the hole finishes).
 
 ## Rules (this variant)
 

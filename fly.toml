@@ -16,13 +16,14 @@ primary_region = "lhr"
 [http_service]
   internal_port = 8080
   force_https = true
-  # Machines may stop when fully idle to save money. Open WebSockets count as
-  # activity, so a table mid-game keeps the machine alive; idle rooms are
-  # GC'd server-side after 30 minutes anyway. Set min_machines_running = 1
-  # if you'd rather never cold-start.
-  auto_stop_machines = "stop"
+  # Rooms live in this process's memory. If the machine ever stops — and it
+  # can the moment every player's socket blips at once (phones sleeping, a
+  # proxy hiccup) — every room evaporates and rejoins get RoomNotFound.
+  # Keep one machine running at all times; auto_start then only covers
+  # crash recovery.
+  auto_stop_machines = "off"
   auto_start_machines = true
-  min_machines_running = 0
+  min_machines_running = 1
 
 [[vm]]
   size = "shared-cpu-1x"

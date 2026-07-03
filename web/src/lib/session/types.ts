@@ -1,5 +1,7 @@
 import type { Action } from "../protocol/Action";
+import type { Emote } from "../protocol/Emote";
 import type { Event } from "../protocol/Event";
+import type { LobbyState } from "../protocol/LobbyState";
 import type { PlayerView } from "../protocol/PlayerView";
 
 /**
@@ -19,6 +21,15 @@ export interface GameSession {
   /** Online only: connection state and last transient server error. */
   readonly status?: SessionStatus;
   readonly error?: string | null;
+  /** Online only: latest reaction per seat, for bubbles. */
+  readonly emotes?: Record<number, { emote: Emote; n: number }>;
+  /** Online only: whether this client is the room host. */
+  readonly isHost?: boolean;
+  /** Online only: current room roster (also kept fresh mid-game). */
+  readonly lobby?: LobbyState | null;
+  sendEmote?(emote: Emote): void;
+  /** Online, host only: mid-game this hands the seat to a bot. */
+  removeSeat?(seat: number): void;
   send(action: Action): void;
   /** Pass-and-play: the named player confirmed they have the device. */
   confirmPass(): void;

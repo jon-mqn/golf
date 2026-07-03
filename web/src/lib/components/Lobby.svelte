@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { Difficulty } from "../protocol/Difficulty";
   import type { OnlineSession } from "../session/online.svelte";
+  import { ALL_EMOTES, EMOTE_GLYPH } from "../emotes";
 
   let {
     session,
@@ -59,11 +60,16 @@
               {seat.name}
               {#if i === lobby.host}<span class="badge">host</span>{/if}
               {#if i === lobby.you}<span class="badge you">you</span>{/if}
+              {#if session.emotes[i]}
+                {#key session.emotes[i].n}
+                  <span class="emote-bubble">{EMOTE_GLYPH[session.emotes[i].emote]}</span>
+                {/key}
+              {/if}
             </span>
             {#if !seat.connected && !seat.difficulty}
               <span class="offline">offline</span>
             {/if}
-            {#if session.isHost && seat.difficulty}
+            {#if session.isHost && i !== lobby.host}
               <button
                 class="quiet small"
                 onclick={() => session.removeSeat(i)}
@@ -104,6 +110,14 @@
     {:else}
       <p class="status">Waiting for {lobby.seats[lobby.host]?.name ?? "the host"} to tee off…</p>
     {/if}
+
+    <div class="emotes" role="group" aria-label="Send a reaction">
+      {#each ALL_EMOTES as e (e)}
+        <button class="emote" onclick={() => session.sendEmote(e)} aria-label={e}>
+          {EMOTE_GLYPH[e]}
+        </button>
+      {/each}
+    </div>
   {/if}
 
   {#if session.error}
@@ -233,6 +247,39 @@
 
   .tee {
     margin-top: auto;
+  }
+
+  .emotes {
+    display: flex;
+    justify-content: center;
+    gap: 0.4rem;
+  }
+  .emote {
+    font-size: 1.25rem;
+    line-height: 1;
+    background: rgba(246, 240, 221, 0.07);
+    border: 1px solid rgba(246, 240, 221, 0.15);
+    border-radius: 10px;
+    padding: 0.45rem 0.55rem;
+  }
+  .emote:active {
+    background: rgba(217, 180, 101, 0.3);
+  }
+  .emote-bubble {
+    display: inline-block;
+    margin-left: 0.35em;
+    font-size: 1.1rem;
+    animation: emote-pop 0.35s cubic-bezier(0.2, 1.6, 0.4, 1);
+  }
+  @keyframes emote-pop {
+    from {
+      transform: scale(0.2);
+      opacity: 0;
+    }
+    to {
+      transform: scale(1);
+      opacity: 1;
+    }
   }
   .status {
     text-align: center;

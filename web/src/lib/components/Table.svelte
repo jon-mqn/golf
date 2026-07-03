@@ -1,6 +1,8 @@
 <script lang="ts">
+  import type { Emote } from "../protocol/Emote";
   import type { GameSession } from "../session/types";
   import { cardLabel } from "../cards";
+  import { ALL_EMOTES, EMOTE_GLYPH } from "../emotes";
   import CardView from "./CardView.svelte";
   import PlayerGrid from "./PlayerGrid.svelte";
   import PassScreen from "./PassScreen.svelte";
@@ -34,6 +36,33 @@
     return slot.type === "FaceUp" ? slot.card : null;
   });
 
+  let emotesOpen = $state(false);
+  const emotes = $derived(session.emotes ?? {});
+  /** Room roster; mid-game a kicked seat flips to a bot here. */
+  const roster = $derived(session.lobby?.seats ?? null);
+
+  function isKickable(s: number): boolean {
+    return (
+      session.isHost === true &&
+      session.removeSeat !== undefined &&
+      roster !== null &&
+      roster[s] != null &&
+      !roster[s].difficulty
+    );
+  }
+
+  function kick(s: number) {
+    const name = view?.seats[s]?.name ?? "this player";
+    if (confirm(`Remove ${name} from the table? A bot takes over their seat.`)) {
+      session.removeSeat?.(s);
+    }
+  }
+
+  function sendEmote(e: Emote) {
+    session.sendEmote?.(e);
+    emotesOpen = false;
+  }
+
   const hint = $derived.by(() => {
     if (!view || !playing) return "";
     if (!myTurn) return `${currentName} is playing…`;
@@ -62,8 +91,26 @@
       <span class="hole">
         <span class="flag">⛳</span> Hole {view.hole_number} <em>of {view.holes_total}</em>
       </span>
-      <span class="spacer"></span>
+      {#if session.sendEmote}
+        <button
+          class="quiet small emote-toggle"
+          class:open={emotesOpen}
+          onclick={() => (emotesOpen = !emotesOpen)}
+          aria-label="Send a reaction"
+          aria-expanded={emotesOpen}>😊</button
+        >
+      {:else}
+        <span class="spacer"></span>
+      {/if}
     </header>
+
+    {#if emotesOpen}
+      <div class="emote-palette" role="group" aria-label="Reactions">
+        {#each ALL_EMOTES as e (e)}
+          <button onclick={() => sendEmote(e)} aria-label={e}>{EMOTE_GLYPH[e]}</button>
+        {/each}
+      </div>
+    {/if}
 
     <section
       class="opponents"
@@ -75,8 +122,21 @@
           <div class="opponent" class:active={playing && view.current === s}>
             <PlayerGrid grid={seat.grid} size="sm" />
             <span class="tag">
-              {seat.name}{seat.is_bot ? " 🤖" : ""} · {view.totals[s] > 0 ? "+" : ""}{view.totals[s]}
+              {seat.name}{seat.is_bot || roster?.[s]?.difficulty ? " 🤖" : ""} · {view.totals[s] >
+              0
+                ? "+"
+                : ""}{view.totals[s]}
             </span>
+            {#if emotes[s]}
+              {#key emotes[s].n}
+                <span class="bubble">{EMOTE_GLYPH[emotes[s].emote]}</span>
+              {/key}
+            {/if}
+            {#if isKickable(s)}
+              <button class="kick" onclick={() => kick(s)} aria-label={`Remove ${seat.name}`}
+                >✕</button
+              >
+            {/if}
           </div>
         {/if}
       {/each}
@@ -128,6 +188,11 @@
         <span class="tag self">
           {view.seats[me].name} · {view.totals[me] > 0 ? "+" : ""}{view.totals[me]}
         </span>
+        {#if emotes[me]}
+          {#key emotes[me].n}
+            <span class="bubble">{EMOTE_GLYPH[emotes[me].emote]}</span>
+          {/key}
+        {/if}
       </section>
     {/if}
 
@@ -185,6 +250,80 @@
     max-width: 560px;
     margin: 0 auto;
     gap: 0.2rem;
+    position: relative;
+  }
+
+  .emote-toggle {
+    width: 4.5rem;
+    text-align: right;
+    font-size: 1.05rem;
+  }
+  .emote-toggle.open {
+    opacity: 0.6;
+  }
+  .emote-palette {
+    position: absolute;
+    top: 2.4rem;
+    right: 0.75rem;
+    z-index: 5;
+    display: flex;
+    gap: 0.3rem;
+    padding: 0.35rem;
+    border-radius: 12px;
+    background: rgba(38, 36, 31, 0.95);
+    border: 1px solid rgba(246, 240, 221, 0.2);
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.4);
+  }
+  .emote-palette button {
+    font-size: 1.3rem;
+    line-height: 1;
+    padding: 0.35rem 0.4rem;
+    border-radius: 8px;
+    background: transparent;
+    border: none;
+  }
+  .emote-palette button:active {
+    background: rgba(217, 180, 101, 0.3);
+  }
+
+  .bubble {
+    position: absolute;
+    top: -0.6rem;
+    right: -0.4rem;
+    font-size: 1.5rem;
+    line-height: 1;
+    padding: 0.15rem;
+    border-radius: 50%;
+    background: rgba(38, 36, 31, 0.85);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+    animation: bubble-pop 0.35s cubic-bezier(0.2, 1.6, 0.4, 1);
+    pointer-events: none;
+    z-index: 4;
+  }
+  @keyframes bubble-pop {
+    from {
+      transform: scale(0.2) translateY(0.4rem);
+      opacity: 0;
+    }
+    to {
+      transform: scale(1) translateY(0);
+      opacity: 1;
+    }
+  }
+
+  .kick {
+    position: absolute;
+    top: -0.35rem;
+    left: -0.35rem;
+    font-size: 0.7rem;
+    line-height: 1;
+    width: 1.3rem;
+    height: 1.3rem;
+    border-radius: 50%;
+    border: 1px solid rgba(200, 68, 44, 0.6);
+    background: rgba(38, 36, 31, 0.9);
+    color: var(--flag, #c8442c);
+    z-index: 4;
   }
 
   header {
@@ -223,6 +362,7 @@
     border-radius: 10px;
     padding: 0.3rem 0.55rem;
     border: 1px solid transparent;
+    position: relative;
   }
   .opponent.active {
     border-color: rgba(217, 180, 101, 0.7);
@@ -278,6 +418,7 @@
     padding: 0.4rem 0.5rem;
     border-radius: 14px;
     border: 1px solid transparent;
+    position: relative;
   }
   .mine.active {
     border-color: rgba(217, 180, 101, 0.5);

@@ -22,6 +22,21 @@
     pairColor?: string | null;
     onclick?: () => void;
   } = $props();
+
+  // Play a flip animation when a face-down card turns face-up.
+  const showsFace = $derived(card !== null && !peeked);
+  let wasDown: boolean | null = null; // unknown until the first effect run
+  let flipping = $state(false);
+  $effect(() => {
+    const down = !showsFace;
+    if (wasDown === true && !down) {
+      flipping = true;
+      const timer = setTimeout(() => (flipping = false), 450);
+      wasDown = down;
+      return () => clearTimeout(timer);
+    }
+    wasDown = down;
+  });
 </script>
 
 {#if interactive}
@@ -30,6 +45,7 @@
     class:face-down={card === null || peeked}
     class:peeked
     class:highlight
+    class:flipping
     {onclick}
   >
     {#if card}
@@ -46,6 +62,7 @@
     class:face-down={card === null || peeked}
     class:peeked
     class:highlight
+    class:flipping
     style:box-shadow={pairColor ? `0 0 0 3px ${pairColor}` : undefined}
   >
     {#if card}
@@ -165,8 +182,22 @@
       outline-color: rgba(217, 180, 101, 0.35);
     }
   }
+
+  .flipping {
+    animation: flip-in 400ms ease-out;
+  }
+  @keyframes flip-in {
+    0% {
+      transform: rotateY(88deg);
+    }
+    100% {
+      transform: rotateY(0deg);
+    }
+  }
+
   @media (prefers-reduced-motion: reduce) {
-    .highlight {
+    .highlight,
+    .flipping {
       animation: none;
     }
   }

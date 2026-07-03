@@ -1,89 +1,59 @@
-<script>
-  import svelteLogo from './assets/svelte.svg'
-  import viteLogo from './assets/vite.svg'
-  import heroImg from './assets/hero.png'
-  import Counter from './lib/Counter.svelte'
+<script lang="ts">
+  import type { MatchConfig } from "./lib/protocol/MatchConfig";
+  import type { GameSession } from "./lib/session/types";
+  import { createLocalSession } from "./lib/session/local.svelte";
+  import Home from "./lib/components/Home.svelte";
+  import LocalSetup from "./lib/components/LocalSetup.svelte";
+  import Table from "./lib/components/Table.svelte";
+
+  type Screen =
+    | { t: "home" }
+    | { t: "setup"; mode: "pass" | "bots" }
+    | { t: "game"; session: GameSession; local: boolean };
+
+  let screen = $state<Screen>({ t: "home" });
+  let lastConfig: MatchConfig | null = null;
+
+  async function startLocal(config: MatchConfig) {
+    lastConfig = config;
+    const session = await createLocalSession(config);
+    screen = { t: "game", session, local: true };
+  }
+
+  function exitGame() {
+    if (screen.t === "game") screen.session.destroy();
+    screen = { t: "home" };
+  }
+
+  async function rematch() {
+    if (screen.t !== "game" || !lastConfig) return;
+    screen.session.destroy();
+    const session = await createLocalSession(lastConfig);
+    screen = { t: "game", session, local: true };
+  }
+
+  // Online play (rooms) lands with the server milestone.
+  function createRoom() {
+    alert("Online tables aren't open yet — play on this device for now.");
+  }
+  function joinRoom(_code: string) {
+    createRoom();
+  }
 </script>
 
-<section id="center">
-  <div class="hero">
-    <img src={heroImg} class="base" width="170" height="179" alt="" />
-    <img src={svelteLogo} class="framework" alt="Svelte logo" />
-    <img src={viteLogo} class="vite" alt="Vite logo" />
-  </div>
-  <div>
-    <h1>Get started</h1>
-    <p>Edit <code>src/App.svelte</code> and save to test <code>HMR</code></p>
-  </div>
-  <Counter />
-</section>
-
-<div class="ticks"></div>
-
-<section id="next-steps">
-  <div id="docs">
-    <svg class="icon" role="presentation" aria-hidden="true">
-      <use href="/icons.svg#documentation-icon"></use>
-    </svg>
-    <h2>Documentation</h2>
-    <p>Your questions, answered</p>
-    <ul>
-      <li>
-        <a href="https://vite.dev/" target="_blank" rel="noreferrer">
-          <img class="logo" src={viteLogo} alt="" />
-          Explore Vite
-        </a>
-      </li>
-      <li>
-        <a href="https://svelte.dev/" target="_blank" rel="noreferrer">
-          <img class="button-icon" src={svelteLogo} alt="" />
-          Learn more
-        </a>
-      </li>
-    </ul>
-  </div>
-  <div id="social">
-    <svg class="icon" role="presentation" aria-hidden="true">
-      <use href="/icons.svg#social-icon"></use>
-    </svg>
-    <h2>Connect with us</h2>
-    <p>Join the Vite community</p>
-    <ul>
-      <li>
-        <a href="https://github.com/vitejs/vite" target="_blank" rel="noreferrer">
-          <svg class="button-icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#github-icon"></use>
-          </svg>
-          GitHub
-        </a>
-      </li>
-      <li>
-        <a href="https://chat.vite.dev/" target="_blank" rel="noreferrer">
-          <svg class="button-icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#discord-icon"></use>
-          </svg>
-          Discord
-        </a>
-      </li>
-      <li>
-        <a href="https://x.com/vite_js" target="_blank" rel="noreferrer">
-          <svg class="button-icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#x-icon"></use>
-          </svg>
-          X.com
-        </a>
-      </li>
-      <li>
-        <a href="https://bsky.app/profile/vite.dev" target="_blank" rel="noreferrer">
-          <svg class="button-icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#bluesky-icon"></use>
-          </svg>
-          Bluesky
-        </a>
-      </li>
-    </ul>
-  </div>
-</section>
-
-<div class="ticks"></div>
-<section id="spacer"></section>
+{#if screen.t === "home"}
+  <Home
+    onPassPlay={() => (screen = { t: "setup", mode: "pass" })}
+    onBots={() => (screen = { t: "setup", mode: "bots" })}
+    onCreateRoom={createRoom}
+    onJoinRoom={joinRoom}
+  />
+{:else if screen.t === "setup"}
+  <LocalSetup mode={screen.mode} onStart={startLocal} onBack={() => (screen = { t: "home" })} />
+{:else if screen.t === "game"}
+  <Table
+    session={screen.session}
+    onExit={exitGame}
+    onRematch={screen.local ? rematch : undefined}
+  />
+{/if}

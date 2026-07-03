@@ -17,5 +17,7 @@
     "checkJs": true,
     "moduleDetection": "force"
   },
-  "include": ["src/**/*.ts", "src/**/*.js", "src/**/*.svelte"]
+  "include": ["src/**/*.ts", "src/**/*.js", "src/**/*.svelte"],
+  // Generated wasm-bindgen glue is not written to satisfy checkJs.
+  "exclude": ["src/lib/wasm"]
 }

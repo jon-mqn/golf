@@ -20,7 +20,7 @@ pub enum Difficulty {
 
 /// Bots decide from a redacted [`PlayerView`] only, so they are structurally
 /// incapable of cheating, and the same code runs in WASM and on the server.
-pub trait Bot: Send {
+pub trait Bot: Send + Sync {
     /// Choose the next action for the viewer seat of `view`. Only called when
     /// it is this bot's turn; must return a legal action.
     fn choose(&mut self, view: &PlayerView, rng: &mut dyn RngCore) -> Action;

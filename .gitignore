@@ -1,5 +1,6 @@
 /target
 node_modules/
-web/dist/
+web/dist/*
+!web/dist/.gitkeep
 web/src/lib/wasm/
 *.log

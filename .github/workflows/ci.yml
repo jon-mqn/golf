@@ -24,7 +24,7 @@ jobs:
           cargo test --workspace
       - name: Protocol bindings are up to date
         run: |
-          TS_RS_EXPORT_DIR=$PWD/web/src/lib/protocol cargo test -p golf-engine export_bindings
+          TS_RS_EXPORT_DIR=$PWD/web/src/lib/protocol cargo test -p golf-engine -p golf-server export_bindings
           git diff --exit-code web/src/lib/protocol
       - name: Frontend
         run: |

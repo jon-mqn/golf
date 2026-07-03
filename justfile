@@ -8,7 +8,7 @@ wasm:
 
 # Regenerate the TypeScript protocol types from the Rust structs.
 bindings:
-    TS_RS_EXPORT_DIR={{justfile_directory()}}/web/src/lib/protocol cargo test -p golf-engine export_bindings
+    TS_RS_EXPORT_DIR={{justfile_directory()}}/web/src/lib/protocol cargo test -p golf-engine -p golf-server export_bindings
 
 # Run the API server (:8080) and Vite dev server (:5173) together.
 dev: wasm bindings

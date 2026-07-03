@@ -1,0 +1,36 @@
+name: CI
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Rust checks
+        run: |
+          cargo fmt --all --check
+          cargo clippy --workspace --all-targets -- -D warnings
+          cargo test --workspace
+      - name: Protocol bindings are up to date
+        run: |
+          TS_RS_EXPORT_DIR=$PWD/web/src/lib/protocol cargo test -p golf-engine export_bindings
+          git diff --exit-code web/src/lib/protocol
+      - name: Frontend
+        run: |
+          curl -fsSL https://github.com/rustwasm/wasm-pack/releases/download/v0.13.1/wasm-pack-v0.13.1-x86_64-unknown-linux-musl.tar.gz | tar xz
+          ./wasm-pack-v0.13.1-x86_64-unknown-linux-musl/wasm-pack build crates/golf-wasm --dev --target web --out-dir ../../web/src/lib/wasm --no-pack
+          cd web
+          npm ci
+          npm run check
+          npm run build

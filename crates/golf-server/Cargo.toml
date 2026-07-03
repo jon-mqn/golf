@@ -1,0 +1,23 @@
+[package]
+name = "golf-server"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+golf-engine = { path = "../golf-engine" }
+serde.workspace = true
+serde_json.workspace = true
+ts-rs.workspace = true
+rand = "0.9"
+axum = { version = "0.8", features = ["ws"] }
+tokio = { version = "1", features = ["full"] }
+futures-util = "0.3"
+uuid = { version = "1", features = ["v4", "serde"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+rust-embed = "8"
+mime_guess = "2"
+
+[dev-dependencies]
+tokio-tungstenite = "0.26"

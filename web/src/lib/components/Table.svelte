@@ -52,6 +52,11 @@
 
 {#if view}
   <div class="table">
+    {#if session.status === "reconnecting"}
+      <div class="banner">Connection lost — reconnecting…</div>
+    {:else if session.error}
+      <div class="banner error">{session.error}</div>
+    {/if}
     <header>
       <button class="quiet small" onclick={onExit}>← Leave</button>
       <span class="hole">
@@ -153,6 +158,21 @@
 {/if}
 
 <style>
+  .banner {
+    text-align: center;
+    background: rgba(217, 180, 101, 0.18);
+    border: 1px solid rgba(217, 180, 101, 0.5);
+    color: var(--sand, #d9b465);
+    border-radius: 8px;
+    padding: 0.35rem 0.6rem;
+    font-size: 0.8rem;
+  }
+  .banner.error {
+    color: var(--cream, #f6f0dd);
+    background: rgba(200, 68, 44, 0.25);
+    border-color: rgba(200, 68, 44, 0.6);
+  }
+
   .table {
     min-height: 100dvh;
     display: flex;
